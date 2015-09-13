@@ -15,10 +15,6 @@ __global__ void kUpSweep(int d, int *data) {
     }
 }
 
-__global__ void zeroLastElt(int n, int *odata) {
-    odata[n-1] = 0;
-}
-
 __global__ void kDownSweep(int d, int *data) {
     int k = threadIdx.x;
     if (k % (int)exp2f(d+1) == 0) {
@@ -27,6 +23,22 @@ __global__ void kDownSweep(int d, int *data) {
         int t = data[left];
         data[left] = data[right];
         data[right] += t;
+    }
+}
+
+/*
+ * In-place scan on `dev_idata`, which must be a device memory pointer.
+ */
+void dv_scan(int n, int *dev_idata) {
+    for (int d = 0; d < ilog2ceil(n)-1; d++) {
+        kUpSweep<<<1, n>>>(d, dev_idata);
+    }
+
+    int z = 0;
+    cudaMemcpy(&dev_idata[n-1], &z, sizeof(int), cudaMemcpyHostToDevice);
+
+    for (int d = ilog2ceil(n)-1; d >= 0; d--) {
+        kDownSweep<<<1, n>>>(d, dev_idata);
     }
 }
 
@@ -41,12 +53,8 @@ void scan(int size, int *odata, const int *input) {
         n = (int)exp2f(ilog2ceil(size));
         idata = (int*)malloc(n * sizeof(int));
         memcpy(idata, input, n * sizeof(int));
-        for (int j = 0; j < n; j++) {
-            if (j < size) {
-                idata[j] = input[j];
-            } else {
-                idata[j] = 0;
-            }
+        for (int j = size; j < n; j++) {
+            idata[j] = 0;
         }
     } else {
         n = size;
@@ -54,25 +62,16 @@ void scan(int size, int *odata, const int *input) {
         memcpy(idata, input, n * sizeof(int));
     }
 
-    int *A;
+    int *dv_idata;
     int array_size = n * sizeof(int);
 
-    cudaMalloc((void**) &A, array_size);
-    cudaMemcpy(A, idata, array_size, cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &dv_idata, array_size);
+    cudaMemcpy(dv_idata, idata, array_size, cudaMemcpyHostToDevice);
 
-    for (int d = 0; d < ilog2ceil(n)-1; d++) {
-        kUpSweep<<<1, n>>>(d, A);
-    }
+    dv_scan(n, dv_idata);
 
-    zeroLastElt<<<1, 1>>>(n, A);
-
-    for (int d = ilog2ceil(n)-1; d >= 0; d--) {
-        kDownSweep<<<1, n>>>(d, A);
-    }
-
-    cudaMemcpy(odata, A, size * sizeof(int), cudaMemcpyDeviceToHost);
-
-    cudaFree(A);
+    cudaMemcpy(odata, dv_idata, array_size, cudaMemcpyDeviceToHost);
+    cudaFree(dv_idata);
 }
 
 /**
