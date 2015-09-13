@@ -23,7 +23,10 @@ namespace Common {
  * which map to 0 will be removed, and elements which map to 1 will be kept.
  */
 __global__ void kernMapToBoolean(int n, int *bools, const int *idata) {
-    // TODO
+    int k = threadIdx.x;
+    if (k >= n) { return; }
+
+    bools[k] = (idata[k] != 0) ? 1 : 0;
 }
 
 /**
