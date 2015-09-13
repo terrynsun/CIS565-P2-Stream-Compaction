@@ -6,14 +6,53 @@
 namespace StreamCompaction {
 namespace Efficient {
 
-// TODO: __global__
+__global__ void kUpSweep(int d, int *data) {
+    int k = threadIdx.x;
+    int exp_d  = (int)exp2f(d);
+    int exp_d1 = (int)exp2f(d+1);
+    if (k % exp_d1 == 0) {
+        data[k + exp_d1 - 1] += data[k + exp_d - 1];
+    }
+}
+
+__global__ void zeroLastElt(int n, int *odata) {
+    odata[n-1] = 0;
+}
+
+__global__ void kDownSweep(int d, int *data) {
+    int k = threadIdx.x;
+    if (k % (int)exp2f(d+1) == 0) {
+        int left  = k + (int)exp2f(d) - 1;
+        int right = k + (int)exp2f(d+1) - 1;
+        int t = data[left];
+        data[left] = data[right];
+        data[right] += t;
+    }
+}
 
 /**
  * Performs prefix-sum (aka scan) on idata, storing the result into odata.
  */
 void scan(int n, int *odata, const int *idata) {
-    // TODO
-    printf("TODO\n");
+    int *A;
+    int array_size = n * sizeof(int);
+
+    cudaMalloc((void**) &A, array_size);
+    cudaMemcpy(A, idata, array_size, cudaMemcpyHostToDevice);
+
+    for (int d = 0; d < ilog2ceil(n)-1; d++) {
+        kUpSweep<<<1, n>>>(d, A);
+    }
+
+    zeroLastElt<<<1, 1>>>(n, A);
+
+    for (int d = ilog2ceil(n)-1; d >= 0; d--) {
+        kDownSweep<<<1, n>>>(d, A);
+    }
+
+    cudaMemcpy(odata, A, array_size, cudaMemcpyDeviceToHost);
+
+    cudaFree(A);
 }
 
 /**
