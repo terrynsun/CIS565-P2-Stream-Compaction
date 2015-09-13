@@ -33,7 +33,27 @@ __global__ void kDownSweep(int d, int *data) {
 /**
  * Performs prefix-sum (aka scan) on idata, storing the result into odata.
  */
-void scan(int n, int *odata, const int *idata) {
+void scan(int size, int *odata, const int *input) {
+    int *idata;
+    int n;
+
+    if (size & (size-1) != 0) { // if size is not a power of 2
+        n = (int)exp2f(ilog2ceil(size));
+        idata = (int*)malloc(n * sizeof(int));
+        memcpy(idata, input, n * sizeof(int));
+        for (int j = 0; j < n; j++) {
+            if (j < size) {
+                idata[j] = input[j];
+            } else {
+                idata[j] = 0;
+            }
+        }
+    } else {
+        n = size;
+        idata = (int*)malloc(n * sizeof(int));
+        memcpy(idata, input, n * sizeof(int));
+    }
+
     int *A;
     int array_size = n * sizeof(int);
 
@@ -50,7 +70,7 @@ void scan(int n, int *odata, const int *idata) {
         kDownSweep<<<1, n>>>(d, A);
     }
 
-    cudaMemcpy(odata, A, array_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(odata, A, size * sizeof(int), cudaMemcpyDeviceToHost);
 
     cudaFree(A);
 }
