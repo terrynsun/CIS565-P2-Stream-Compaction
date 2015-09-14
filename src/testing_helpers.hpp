@@ -33,6 +33,23 @@ void printCmpLenResult(int n, int expN, T *a, T *b) {
             cmpArrays(n, a, b) ? "FAIL VALUE" : "passed");
 }
 
+template<typename T>
+int testArrayOrder(int n, T *a) {
+    for (int i = 0; i < n-1; i++) {
+        if (a[i] < a[i+1]) {
+            printf("    (a[%d] = %d) < (a[%d] = %d)\n", i, a[i], i+1, a[i+1]);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+template<typename T>
+void printArrayOrderResult(int n, T *a) {
+    printf("    %s \n",
+            testArrayOrder(n, a) ? "FAIL VALUE" : "passed");
+}
+
 void zeroArray(int n, int *a) {
     for (int i = 0; i < n; i++) {
         a[i] = 0;
