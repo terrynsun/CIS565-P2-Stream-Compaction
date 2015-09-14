@@ -29,13 +29,16 @@ __global__ void kernMapToBoolean(int n, int *bools, const int *idata) {
     bools[k] = (idata[k] != 0) ? 1 : 0;
 }
 
-/**
- * Performs scatter on an array. That is, for each element in idata,
- * if bools[idx] == 1, it copies idata[idx] to odata[indices[idx]].
- */
-__global__ void kernScatter(int n, int *odata,
-        const int *idata, const int *bools, const int *indices) {
-    // TODO
+__global__ void kernScatter(int n, int *odata, int *indices, int *idata) {
+    int k = threadIdx.x;
+    if (k >= n) { return; }
+    if (k == n-1) {
+        // always take the last element
+        // `compact` will adjust size appropriately
+        odata[indices[k]] = idata[k];
+    } else if (indices[k] != indices[k+1]) {
+        odata[indices[k]] = idata[k];
+    }
 }
 
 }

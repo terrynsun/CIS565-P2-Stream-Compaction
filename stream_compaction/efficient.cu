@@ -74,18 +74,6 @@ void scan(int size, int *odata, const int *input) {
     cudaFree(dv_idata);
 }
 
-__global__ void kScatter(int n, int *odata, int *indices, int *idata) {
-    int k = threadIdx.x;
-    if (k >= n) { return; }
-    if (k == n-1) {
-        // always take the last element
-        // `compact` will adjust size appropriately
-        odata[indices[k]] = idata[k];
-    } else if (indices[k] != indices[k+1]) {
-        odata[indices[k]] = idata[k];
-    }
-}
-
 /**
  * Performs stream compaction on idata, storing the result into odata.
  * All zeroes are discarded.
@@ -132,7 +120,7 @@ int compact(int size, int *odata, const int *input) {
     int streamSize;
     cudaMemcpy(&streamSize, dev_indices + n-1, sizeof(int), cudaMemcpyDeviceToHost);
 
-    kScatter<<<1, n>>>(n, dev_odata, dev_indices, dev_idata);
+    StreamCompaction::Common::kernScatter<<<1, n>>>(n, dev_odata, dev_indices, dev_idata);
     cudaMemcpy(odata, dev_odata, array_size, cudaMemcpyDeviceToHost);
 
     // The kernel always copies the last elt.
