@@ -6,8 +6,10 @@
 namespace StreamCompaction {
 namespace Efficient {
 
+int BLOCK_SIZE = (2 << 7);
+
 __global__ void kUpSweep(int d, int *data) {
-    int k = threadIdx.x;
+    int k = (blockDim.x * blockIdx.x) + threadIdx.x;
     int exp_d  = (int)exp2f(d);
     int exp_d1 = (int)exp2f(d+1);
     if (k % exp_d1 == 0) {
@@ -16,7 +18,7 @@ __global__ void kUpSweep(int d, int *data) {
 }
 
 __global__ void kDownSweep(int d, int *data) {
-    int k = threadIdx.x;
+    int k = (blockDim.x * blockIdx.x) + threadIdx.x;
     if (k % (int)exp2f(d+1) == 0) {
         int left  = k + (int)exp2f(d) - 1;
         int right = k + (int)exp2f(d+1) - 1;
@@ -30,22 +32,27 @@ __global__ void kDownSweep(int d, int *data) {
  * In-place scan on `dev_idata`, which must be a device memory pointer.
  */
 void dv_scan(int n, int *dev_idata) {
+    int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
     for (int d = 0; d < ilog2ceil(n)-1; d++) {
-        kUpSweep<<<1, n>>>(d, dev_idata);
+        kUpSweep<<<numBlocks, BLOCK_SIZE>>>(d, dev_idata);
+        checkCUDAError("scan");
     }
 
     int z = 0;
     cudaMemcpy(&dev_idata[n-1], &z, sizeof(int), cudaMemcpyHostToDevice);
 
     for (int d = ilog2ceil(n)-1; d >= 0; d--) {
-        kDownSweep<<<1, n>>>(d, dev_idata);
+        kDownSweep<<<numBlocks, BLOCK_SIZE>>>(d, dev_idata);
+        checkCUDAError("scan");
     }
 }
 
 /**
  * Performs prefix-sum (aka scan) on idata, storing the result into odata.
  */
-void scan(int size, int *odata, const int *input) {
+void scan(int size, int *odata, const int *input, float *time, int blockSize) {
+    BLOCK_SIZE = blockSize;
     int *idata;
     int n;
 
@@ -62,13 +69,25 @@ void scan(int size, int *odata, const int *input) {
         memcpy(idata, input, n * sizeof(int));
     }
 
-    int *dv_idata;
+
     int array_size = n * sizeof(int);
+    int *dv_idata;
 
     cudaMalloc((void**) &dv_idata, array_size);
     cudaMemcpy(dv_idata, idata, array_size, cudaMemcpyHostToDevice);
 
+        cudaEvent_t begin, end;
+        cudaEventCreate(&begin);
+        cudaEventCreate(&end);
+        cudaEventRecord(begin, 0);
+
     dv_scan(n, dv_idata);
+
+        cudaEventRecord(end, 0);
+        cudaEventSynchronize(end);
+        cudaEventElapsedTime(time, begin, end);
+        cudaEventDestroy(begin);
+        cudaEventDestroy(end);
 
     cudaMemcpy(odata, dv_idata, array_size, cudaMemcpyDeviceToHost);
     cudaFree(dv_idata);
@@ -83,7 +102,9 @@ void scan(int size, int *odata, const int *input) {
  * @param idata  The array of elements to compact.
  * @returns      The number of elements remaining after compaction.
  */
-int compact(int size, int *odata, const int *input) {
+int compact(int size, int *odata, const int *input, float *time, int blockSize) {
+    BLOCK_SIZE = blockSize;
+
     int *idata;
     int n;
 
@@ -104,6 +125,7 @@ int compact(int size, int *odata, const int *input) {
     int *dev_odata;
     int *dev_idata;
     int array_size = n * sizeof(int);
+    int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     cudaMalloc((void**) &dev_indices, array_size);
     cudaMalloc((void**) &dev_odata, array_size);
@@ -111,7 +133,12 @@ int compact(int size, int *odata, const int *input) {
     cudaMalloc((void**) &dev_idata, array_size);
     cudaMemcpy(dev_idata, idata, array_size, cudaMemcpyHostToDevice);
 
-    StreamCompaction::Common::kernMapToBoolean<<<1, n>>>(n, dev_indices, dev_idata);
+        cudaEvent_t begin, end;
+        cudaEventCreate(&begin);
+        cudaEventCreate(&end);
+        cudaEventRecord(begin, 0);
+
+    StreamCompaction::Common::kernMapToBoolean<<<numBlocks, blockSize>>>(n, dev_indices, dev_idata);
 
     int last;
     cudaMemcpy(&last, dev_indices + n-1, sizeof(int), cudaMemcpyDeviceToHost);
@@ -120,7 +147,14 @@ int compact(int size, int *odata, const int *input) {
     int streamSize;
     cudaMemcpy(&streamSize, dev_indices + n-1, sizeof(int), cudaMemcpyDeviceToHost);
 
-    StreamCompaction::Common::kernScatter<<<1, n>>>(n, dev_odata, dev_indices, dev_idata);
+    StreamCompaction::Common::kernScatter<<<numBlocks, blockSize>>>(n, dev_odata, dev_indices, dev_idata);
+
+        cudaEventRecord(end, 0);
+        cudaEventSynchronize(end);
+        cudaEventElapsedTime(time, begin, end);
+        cudaEventDestroy(begin);
+        cudaEventDestroy(end);
+
     cudaMemcpy(odata, dev_odata, array_size, cudaMemcpyDeviceToHost);
 
     // The kernel always copies the last elt.
