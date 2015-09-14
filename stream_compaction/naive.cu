@@ -6,8 +6,10 @@
 namespace StreamCompaction {
 namespace Naive {
 
+int BLOCK_SIZE = 128;
+
 __global__ void kScan(int d, int *odata, const int *idata) {
-    int k = threadIdx.x;
+    int k = (blockDim.x * blockIdx.x) + threadIdx.x;
     if (k >= (int)exp2f(d-1)) {
         odata[k] = idata[k - (int)exp2f(d-1)] + idata[k];
     } else {
@@ -15,13 +17,25 @@ __global__ void kScan(int d, int *odata, const int *idata) {
     }
 }
 
+__global__ void kShift(int n, int *odata, int *idata) {
+    int k = (blockDim.x * blockIdx.x) + threadIdx.x;
+    if (k >= n) { return; }
+    if (k == 0) {
+        odata[0] = 0;
+    } else {
+        odata[k] = idata[k-1];
+    }
+}
+
 /**
  * Performs prefix-sum (aka scan) on idata, storing the result into odata.
  */
 __host__ void scan(int n, int *odata, const int *idata) {
+    int array_size = n * sizeof(int);
+    int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
     int *A;
     int *B;
-    int array_size = n * sizeof(int);
 
     cudaMalloc((void**) &A, array_size);
     cudaMalloc((void**) &B, array_size);
@@ -29,21 +43,18 @@ __host__ void scan(int n, int *odata, const int *idata) {
 
     int *in;
     int *out;
+
     for (int d = 1; d < ilog2ceil(n)+1; d++) {
         in  = (d % 2 == 1) ? A : B;
         out = (d % 2 == 1) ? B : A;
-        kScan<<<1, n>>>(d, out, in);
+        kScan<<<numBlocks, BLOCK_SIZE>>>(d, out, in);
         checkCUDAError("scan");
-        cudaDeviceSynchronize();
     }
-
-    cudaMemcpy(odata, out, array_size, cudaMemcpyDeviceToHost);
 
     // shift odata to the right for exclusive scan
-    for (int i = n-1; i >= 0; i--) {
-        odata[i+1] = odata[i];
-    }
-    odata[0] = 0;
+    kShift<<<numBlocks, BLOCK_SIZE>>>(n, in, out);
+
+    cudaMemcpy(odata, in, array_size, cudaMemcpyDeviceToHost);
 
     cudaFree(A);
     cudaFree(B);
