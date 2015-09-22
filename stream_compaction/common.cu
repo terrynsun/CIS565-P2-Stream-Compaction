@@ -1,6 +1,10 @@
 #include "common.h"
 
+#define ERRORCHECK 1
+
 void checkCUDAErrorFn(const char *msg, const char *file, int line) {
+#if ERRORCHECK
+    cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (cudaSuccess == err) {
         return;
@@ -12,6 +16,7 @@ void checkCUDAErrorFn(const char *msg, const char *file, int line) {
     }
     fprintf(stderr, ": %s: %s\n", msg, cudaGetErrorString(err));
     exit(EXIT_FAILURE);
+#endif
 }
 
 
