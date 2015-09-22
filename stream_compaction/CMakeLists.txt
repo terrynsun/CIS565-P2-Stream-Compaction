@@ -7,6 +7,8 @@ set(SOURCE_FILES
     "naive.cu"
     "efficient.h"
     "efficient.cu"
+    "fewer.h"
+    "fewer.cu"
     "thrust.h"
     "thrust.cu"
     "radix.h"
