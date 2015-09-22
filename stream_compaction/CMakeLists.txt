@@ -9,6 +9,8 @@ set(SOURCE_FILES
     "efficient.cu"
     "fewer.h"
     "fewer.cu"
+    "shared.h"
+    "shared.cu"
     "thrust.h"
     "thrust.cu"
     "radix.h"

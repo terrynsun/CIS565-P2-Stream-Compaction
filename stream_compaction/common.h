@@ -12,7 +12,7 @@
  */
 void checkCUDAErrorFn(const char *msg, const char *file = NULL, int line = -1);
 
-inline int ilog2(int x) {
+__device__ __host__ inline int ilog2(int x) {
     int lg = 0;
     while (x >>= 1) {
         ++lg;
@@ -20,7 +20,7 @@ inline int ilog2(int x) {
     return lg;
 }
 
-inline int ilog2ceil(int x) {
+__device__ __host__ inline int ilog2ceil(int x) {
     return ilog2(x - 1) + 1;
 }
 
