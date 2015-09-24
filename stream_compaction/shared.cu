@@ -6,7 +6,7 @@
 namespace StreamCompaction {
 namespace Shared {
 
-int BLOCK_SIZE = 4;
+int BLOCK_SIZE = 1 << 2;
 
 __global__ void kUpSweep(int *data, int n) {
     int t = threadIdx.x;
@@ -77,12 +77,19 @@ __global__ void kDownSweep(int *data, int n) {
     __syncthreads();
 }
 
-__global__ void kCollectBlockSums(int *odata, int *idata,
-        int numBlocks, int blockSize) {
+__global__ void kStoreLastElt(int *odata, int *idata, int numBlocks, int blockSize) {
     int t = (blockDim.x * blockIdx.x) + threadIdx.x;
     if (t < numBlocks) {
         int index = (t+1)*blockSize - 1;
         odata[t] = idata[index];
+    }
+}
+
+__global__ void kAddLastElt(int *odata, int *idata, int numBlocks, int blockSize) {
+    int t = (blockDim.x * blockIdx.x) + threadIdx.x;
+    if (t < numBlocks) {
+        int index = (t+1)*blockSize - 1;
+        odata[t] += idata[index];
     }
 }
 
@@ -91,78 +98,50 @@ __global__ void kAddRunningBlockTotal(int *data, int *totals) {
     data[idx] += totals[blockIdx.x];
 }
 
-// Shift left
-// data[t-1] = data[t]; OR data[t] = data[t+1];
-// data[n-1] = data[n-1] + last[blockDim.x];
-__global__ void kConvertExToInclusive(int *data, int *lastData, int n) {
-    int idx = (blockDim.x * blockIdx.x) + threadIdx.x;
-    int t = threadIdx.x;
-    if (t < blockDim.x - 1) {
-        int val = data[idx+1];
-        __syncthreads();
-        data[idx] = val;
-    } else if (t == blockDim.x - 1) {
-        int val = data[idx];
-        __syncthreads();
-        int last = lastData[blockIdx.x];
-        data[idx] = val + last;
-    } else {
-        __syncthreads();
+void printArray(int *arr, int size) {
+    int x;
+    for (int i = 0; i < size; i++) {
+        cudaMemcpy(&x, &arr[i], sizeof(int), cudaMemcpyDeviceToHost);
+        //printf("%d\t", x);
     }
-}
-
-__global__ void kConvertInToExclusive(int *data, int n) {
-    int t = (blockDim.x * blockIdx.x) + threadIdx.x;
-    if (t < n) {
-        int val = data[t];
-        __syncthreads();
-        data[t+1] = val;
-    } else {
-        __syncthreads();
-    }
-    data[0] = 0;
+    //printf("\n");
 }
 
 /*
  * In-place scan on `dev_data`, which must be a device memory pointer.
  */
 void dv_scan(int n, int *dev_data) {
+    printArray(dev_data, n);
+
     // Number of blocks of data
     int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
     // Number of blocks, when operating on the set of blocks
-    int numBlocksForBlocks = (n + numBlocks - 1) / numBlocks;
+    int numBlocksForBlocks = (numBlocks + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    int *blockTotals;
-    cudaMalloc((void**) &blockTotals, n*sizeof(int));
+    int *increments;
+    cudaMalloc((void**) &increments, n*sizeof(int));
 
-    // Store last value, to convert into inclusive scan.
-    kCollectBlockSums<<<numBlocksForBlocks, numBlocks>>>(
-            blockTotals, dev_data, numBlocks, BLOCK_SIZE);
+    // Store last value, to add into block increments later
+    kStoreLastElt<<<numBlocksForBlocks, BLOCK_SIZE>>>(increments, dev_data, numBlocks, BLOCK_SIZE);
 
-    // Run INCLUSIVE scan on each block
+    // Run EXCLUSIVE scan on each block
     kUpSweep<<<numBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(int)>>>(dev_data, n);
-    kStoreZero<<<numBlocksForBlocks, numBlocks>>>(dev_data, numBlocks, BLOCK_SIZE);
+    kStoreZero<<<numBlocksForBlocks, BLOCK_SIZE>>>(dev_data, numBlocks, BLOCK_SIZE);
     kDownSweep<<<numBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(int)>>>(dev_data, n);
-    kConvertExToInclusive<<<numBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(int)>>>(
-            dev_data, blockTotals, n);
 
     // Build array of sums from each block
-    kCollectBlockSums<<<numBlocksForBlocks, numBlocks>>>(
-            blockTotals, dev_data, numBlocks, BLOCK_SIZE);
+    kAddLastElt<<<numBlocksForBlocks, BLOCK_SIZE>>>(increments, dev_data, numBlocks, BLOCK_SIZE);
 
     // Find block increments (EXclusive scan)
-    kUpSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(blockTotals, numBlocks);
-    kStoreZero<<<1, 1>>>(blockTotals, 1, numBlocks);
-    kDownSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(blockTotals, numBlocks);
+    kUpSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(increments, numBlocks);
+    kStoreZero<<<1, 1>>>(increments, 1, numBlocks);
+    kDownSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(increments, numBlocks);
 
     // Add block increments back into each blocks
-    kAddRunningBlockTotal<<<numBlocks, BLOCK_SIZE>>>(dev_data, blockTotals);
-
-    kConvertInToExclusive<<<numBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(int)>>>(
-            dev_data, n);
+    kAddRunningBlockTotal<<<numBlocks, BLOCK_SIZE>>>(dev_data, increments);
 
     checkCUDAError("scan");
-    cudaFree(blockTotals);
+    cudaFree(increments);
 }
 
 /**
