@@ -10,16 +10,16 @@
 #include <stream_compaction/cpu.h>
 #include <stream_compaction/naive.h>
 #include <stream_compaction/efficient.h>
+#include <stream_compaction/shared.h>
 #include <stream_compaction/thrust.h>
 #include "testing_helpers.hpp"
 
 int main(int argc, char* argv[]) {
-    const int SIZE = 1 << 8;
+    const int SIZE = 1 << 19;
     const int NPOT = SIZE - 3;
     int a[SIZE], b[SIZE], c[SIZE];
 
     // Scan tests
-
     printf("\n");
     printf("****************\n");
     printf("** SCAN TESTS **\n");
@@ -65,7 +65,20 @@ int main(int argc, char* argv[]) {
     printCmpResult(NPOT, b, c);
 
     zeroArray(SIZE, c);
+    printDesc("shared memory work-efficient scan, power-of-two");
+    StreamCompaction::Shared::scan(SIZE, c, a);
+    //printArray(SIZE, c, true);
+    printCmpResult(SIZE, b, c);
+
+    zeroArray(SIZE, c);
+    printDesc("shared memory work-efficient scan, non-power-of-two");
+    StreamCompaction::Shared::scan(NPOT, c, a);
+    //printArray(NPOT, c, true);
+    printCmpResult(NPOT, b, c);
+
+    zeroArray(SIZE, c);
     printDesc("thrust scan, power-of-two");
+
     StreamCompaction::Thrust::scan(SIZE, c, a);
     //printArray(SIZE, c, true);
     printCmpResult(SIZE, b, c);
@@ -111,13 +124,14 @@ int main(int argc, char* argv[]) {
 
     zeroArray(SIZE, c);
     printDesc("work-efficient compact, power-of-two");
-    count = StreamCompaction::Efficient::compact(SIZE, c, a);
+    count = StreamCompaction::Shared::compact(SIZE, c, a);
     //printArray(count, c, true);
     printCmpLenResult(count, expectedCount, b, c);
 
     zeroArray(SIZE, c);
     printDesc("work-efficient compact, non-power-of-two");
-    count = StreamCompaction::Efficient::compact(NPOT, c, a);
+    count = StreamCompaction::Shared::compact(NPOT, c, a);
     //printArray(count, c, true);
     printCmpLenResult(count, expectedNPOT, b, c);
 }
+

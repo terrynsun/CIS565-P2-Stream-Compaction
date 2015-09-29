@@ -140,7 +140,7 @@ void dv_scan(int n, int *dev_data) {
 /**
  * Performs prefix-sum (aka scan) on idata, storing the result into odata.
  */
-void scan(int size, int *odata, const int *input) {
+void scan(int size, int *odata, int *input) {
     int *idata;
     int n;
 
@@ -153,8 +153,7 @@ void scan(int size, int *odata, const int *input) {
         }
     } else {
         n = size;
-        idata = (int*)malloc(n * sizeof(int));
-        memcpy(idata, input, n * sizeof(int));
+        idata = input;
     }
 
     int array_size = n * sizeof(int);
