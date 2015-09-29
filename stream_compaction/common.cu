@@ -28,14 +28,14 @@ namespace Common {
  * which map to 0 will be removed, and elements which map to 1 will be kept.
  */
 __global__ void kernMapToBoolean(int n, int *bools, const int *idata) {
-    int k = threadIdx.x;
-    if (k >= n) { return; }
-
-    bools[k] = (idata[k] != 0) ? 1 : 0;
+    int k = (blockDim.x * blockIdx.x) + threadIdx.x;
+    if (k < n) {
+        bools[k] = (idata[k] != 0) ? 1 : 0;
+    }
 }
 
 __global__ void kernScatter(int n, int *odata, int *indices, int *idata) {
-    int k = threadIdx.x;
+    int k = (blockDim.x * blockIdx.x) + threadIdx.x;
     if (k >= n) { return; }
     if (k == n-1) {
         // always take the last element

@@ -24,7 +24,7 @@ __global__ void kUpSweep(int *data, int n) {
         int exp_d1 = (int)exp2f(d+1);
         int k = t * exp_d1;
 
-        if (k < n && k + exp_d1 - 1 < n) {
+        if (k + exp_d1 - 1 < n) {
             int exp_d  = (int)exp2f(d);
             shared[k + exp_d1 - 1] += shared[k + exp_d - 1];
         }
@@ -98,28 +98,17 @@ __global__ void kAddRunningBlockTotal(int *data, int *totals) {
     data[idx] += totals[blockIdx.x];
 }
 
-void printArray(int *arr, int size) {
-    int x;
-    for (int i = 0; i < size; i++) {
-        cudaMemcpy(&x, &arr[i], sizeof(int), cudaMemcpyDeviceToHost);
-        //printf("%d\t", x);
-    }
-    //printf("\n");
-}
-
 /*
  * In-place scan on `dev_data`, which must be a device memory pointer.
  */
 void dv_scan(int n, int *dev_data) {
-    printArray(dev_data, n);
-
     // Number of blocks of data
     int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
     // Number of blocks, when operating on the set of blocks
     int numBlocksForBlocks = (numBlocks + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     int *increments;
-    cudaMalloc((void**) &increments, n*sizeof(int));
+    cudaMalloc((void**) &increments, numBlocks*sizeof(int));
 
     // Store last value, to add into block increments later
     kStoreLastElt<<<numBlocksForBlocks, BLOCK_SIZE>>>(increments, dev_data, numBlocks, BLOCK_SIZE);
@@ -133,9 +122,13 @@ void dv_scan(int n, int *dev_data) {
     kAddLastElt<<<numBlocksForBlocks, BLOCK_SIZE>>>(increments, dev_data, numBlocks, BLOCK_SIZE);
 
     // Find block increments (EXclusive scan)
-    kUpSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(increments, numBlocks);
-    kStoreZero<<<1, 1>>>(increments, 1, numBlocks);
-    kDownSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(increments, numBlocks);
+    if (numBlocks > BLOCK_SIZE) {
+        dv_scan(numBlocks, increments);
+    } else {
+        kUpSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(increments, numBlocks);
+        kStoreZero<<<1, 1>>>(increments, 1, numBlocks);
+        kDownSweep<<<1, numBlocks, numBlocks*sizeof(int)>>>(increments, numBlocks);
+    }
 
     // Add block increments back into each blocks
     kAddRunningBlockTotal<<<numBlocks, BLOCK_SIZE>>>(dev_data, increments);
